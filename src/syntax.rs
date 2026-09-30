@@ -1,4 +1,4 @@
-use crate::buffer::Buffer;
+use crate::{buffer::Buffer, theme};
 use ratatui::style::{Color, Modifier, Style};
 use std::{
     ops::Range,
@@ -7,7 +7,7 @@ use std::{
 };
 use syntect::{
     easy::HighlightLines,
-    highlighting::{FontStyle, HighlightState, Theme, ThemeSet},
+    highlighting::{FontStyle, HighlightState, Theme},
     parsing::{ParseState, SyntaxReference, SyntaxSet},
 };
 
@@ -23,10 +23,7 @@ fn assets() -> &'static Assets {
     static ASSETS: OnceLock<Assets> = OnceLock::new();
     ASSETS.get_or_init(|| Assets {
         syntaxes: SyntaxSet::load_defaults_newlines(),
-        theme: ThemeSet::load_defaults()
-            .themes
-            .remove("base16-ocean.dark")
-            .unwrap(),
+        theme: theme::syntax_theme(),
     })
 }
 

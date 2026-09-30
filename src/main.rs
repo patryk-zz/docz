@@ -6,6 +6,7 @@ mod document;
 mod editor;
 mod input;
 mod syntax;
+mod theme;
 mod ui;
 
 use anyhow::{Context, Result, bail};

@@ -4,21 +4,20 @@ use crate::{
     buffer::Cursor,
     editor::{Editor, Mode},
     syntax::SyntaxSpan,
+    theme,
 };
 use ratatui::{
     Frame,
     layout::{Constraint, Layout, Rect},
-    style::{Color, Modifier, Style},
+    style::{Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph, Wrap},
 };
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-const ACCENT: Color = Color::Cyan;
-const DIM: Color = Color::DarkGray;
-
 pub fn draw(frame: &mut Frame, app: &mut App) {
+    frame.render_widget(Block::default().style(theme::base()), frame.area());
     let [header, main, status, hints] = Layout::vertical([
         Constraint::Length(1),
         Constraint::Min(0),
@@ -27,7 +26,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     ])
     .areas(frame.area());
     let (mode, color, title) = match &app.screen {
-        Screen::Browser(b) => ("EXPLORE", ACCENT, b.directory.display().to_string()),
+        Screen::Browser(b) => ("EXPLORE", theme::AQUA, b.directory.display().to_string()),
         Screen::Editor(e) => (
             match e.mode {
                 Mode::Navigate => "NAVIGATE",
@@ -35,9 +34,9 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 Mode::Selection => "SELECT",
             },
             match e.mode {
-                Mode::Navigate => ACCENT,
-                Mode::Edit => Color::Green,
-                Mode::Selection => Color::Yellow,
+                Mode::Navigate => theme::BLUE,
+                Mode::Edit => theme::GREEN,
+                Mode::Selection => theme::ORANGE,
             },
             format!(
                 "{}{}",
@@ -51,16 +50,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             Span::styled(
                 format!(" {} ", crate::program_name()),
                 Style::default()
-                    .fg(Color::Black)
-                    .bg(ACCENT)
+                    .fg(theme::BG)
+                    .bg(theme::AQUA)
                     .add_modifier(Modifier::BOLD),
             ),
             Span::styled(
                 format!(" {mode} "),
-                Style::default().fg(Color::Black).bg(color),
+                Style::default().fg(theme::BG).bg(color),
             ),
             Span::raw(format!(" {}", safe_text(&title))),
-        ])),
+        ]))
+        .style(theme::panel()),
         header,
     );
     match &mut app.screen {
@@ -102,7 +102,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         }
     };
     frame.render_widget(
-        Paragraph::new(status_text).style(Style::default().fg(color)),
+        Paragraph::new(status_text).style(theme::panel().fg(color)),
         status,
     );
     let hint = match &app.screen {
@@ -119,7 +119,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             " Ctrl+[ / ]: add cursors  Ctrl+\\: one cursor  Quotes/brackets: pair  Esc: navigate  F1: help"
         }
     };
-    frame.render_widget(Paragraph::new(hint).style(Style::default().fg(DIM)), hints);
+    frame.render_widget(
+        Paragraph::new(hint).style(theme::base().fg(theme::MUTED)),
+        hints,
+    );
     if app.help {
         draw_help(frame);
     }
@@ -132,15 +135,16 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         };
         frame.render_widget(Paragraph::new(format!(
             "You have unsaved changes.\nBefore {verb}:\n\ns: save and continue   d: discard   Q/Esc: cancel"
-        )).wrap(Wrap { trim: false }).block(Block::bordered().title(" Unsaved changes ")
-            .border_style(Style::default().fg(Color::Yellow))), area);
+        )).style(theme::panel()).wrap(Wrap { trim: false }).block(Block::bordered().title(" Unsaved changes ")
+            .border_style(Style::default().fg(theme::YELLOW))), area);
     }
 }
 
 fn draw_browser(frame: &mut Frame, area: Rect, browser: &mut Browser) {
     let block = Block::bordered()
         .title(" Choose a file ")
-        .border_style(Style::default().fg(DIM));
+        .style(theme::base())
+        .border_style(Style::default().fg(theme::BORDER));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let height = usize::from(inner.height);
@@ -171,14 +175,11 @@ fn draw_browser(frame: &mut Frame, area: Rect, browser: &mut Browser) {
             safe_text(&entry.label)
         );
         let style = if selected {
-            Style::default()
-                .fg(Color::Black)
-                .bg(ACCENT)
-                .add_modifier(Modifier::BOLD)
+            theme::selected().add_modifier(Modifier::BOLD)
         } else if entry.is_dir {
-            Style::default().fg(ACCENT)
+            theme::base().fg(theme::AQUA)
         } else {
-            Style::default()
+            theme::base()
         };
         frame.render_widget(
             Paragraph::new(text).style(style),
@@ -194,7 +195,8 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &mut Editor, show_cursor: 
     let block = Block::default()
         .borders(Borders::ALL)
         .title(" Buffer ")
-        .border_style(Style::default().fg(DIM));
+        .style(theme::base())
+        .border_style(Style::default().fg(theme::BORDER));
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let height = usize::from(inner.height);
@@ -243,9 +245,9 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &mut Editor, show_cursor: 
             frame.render_widget(
                 Paragraph::new(format!("{:>digits$} ", row + 1, digits = gutter - 1)).style(
                     Style::default().fg(if row == editor.cursor.row {
-                        ACCENT
+                        theme::YELLOW
                     } else {
-                        DIM
+                        theme::GRAY
                     }),
                 ),
                 Rect::new(inner.x, y, gutter as u16, 1),
@@ -263,7 +265,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &mut Editor, show_cursor: 
             );
         } else {
             frame.render_widget(
-                Paragraph::new("~").style(Style::default().fg(DIM)),
+                Paragraph::new("~").style(Style::default().fg(theme::GRAY)),
                 Rect::new(inner.x, y, 1, 1),
             );
         }
@@ -283,7 +285,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &mut Editor, show_cursor: 
                 inner.x + gutter as u16 + (x - editor.left) as u16,
                 inner.y + (cursor.row - editor.top) as u16,
             )]
-                .set_style(Style::default().fg(Color::Black).bg(Color::Magenta));
+                .set_style(theme::secondary_cursor());
         }
         frame.set_cursor_position((
             inner.x + gutter as u16 + (cursor_x - editor.left) as u16,
@@ -358,7 +360,7 @@ fn selected_line(
                 display
             };
             let style = if selected {
-                Style::default().bg(Color::Blue).fg(Color::White)
+                theme::selected()
             } else {
                 while token < syntax.len() && syntax[token].bytes.end <= byte {
                     token += 1;
@@ -366,7 +368,7 @@ fn selected_line(
                 syntax
                     .get(token)
                     .filter(|span| span.bytes.contains(&byte))
-                    .map_or(Style::default(), |span| span.style)
+                    .map_or(theme::base(), |span| theme::base().patch(span.style))
             };
             spans.push(Span::styled(visible, style));
         }
@@ -410,11 +412,14 @@ fn draw_help(frame: &mut Frame) {
         EXPLORER   W/S selects · D/Enter opens · A/Q/Backspace: parent\n\
         F1, Q or Esc closes help. Unsaved changes prompt before leaving.";
     frame.render_widget(
-        Paragraph::new(help).wrap(Wrap { trim: false }).block(
-            Block::bordered()
-                .title(" docz · Help ")
-                .border_style(Style::default().fg(ACCENT)),
-        ),
+        Paragraph::new(help)
+            .style(theme::panel())
+            .wrap(Wrap { trim: false })
+            .block(
+                Block::bordered()
+                    .title(format!(" {} · Help ", crate::program_name()))
+                    .border_style(Style::default().fg(theme::AQUA)),
+            ),
         area,
     );
 }
@@ -422,7 +427,7 @@ fn draw_help(frame: &mut Frame) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{Terminal, backend::TestBackend};
+    use ratatui::{Terminal, backend::TestBackend, style::Color};
 
     #[test]
     fn tabs_unicode_and_partial_wide_glyphs_use_terminal_cells() {
@@ -464,7 +469,7 @@ mod tests {
         e.enter_edit();
         e.add_cursor(false);
         terminal.draw(|f| draw(f, &mut app)).unwrap();
-        assert_eq!(terminal.backend().buffer()[(8, 4)].bg, Color::Magenta);
+        assert_eq!(terminal.backend().buffer()[(8, 4)].bg, theme::PURPLE);
         let Screen::Editor(e) = &mut app.screen else {
             panic!()
         };
@@ -473,8 +478,8 @@ mod tests {
         e.move_cursor(crate::input::Direction::Right, 6);
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let screen = terminal.backend().buffer();
-        assert_eq!(screen[(8, 3)].bg, Color::Blue);
-        assert_eq!(screen[(8, 3)].fg, Color::White);
+        assert_eq!(screen[(8, 3)].bg, theme::SELECTION);
+        assert_eq!(screen[(8, 3)].fg, theme::BRIGHT_FG);
         assert!(matches!(screen[(16, 3)].fg, Color::Rgb(..)));
     }
 
@@ -513,15 +518,15 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let buffer = terminal.backend().buffer();
-        assert_ne!(buffer[(4, 2)].bg, Color::Blue); // Unselected "a".
+        assert_ne!(buffer[(4, 2)].bg, theme::SELECTION); // Unselected "a".
         // Ratatui resets the continuation cell of a wide glyph; the leading cell paints it.
         assert_eq!(buffer[(8, 2)].symbol(), "中");
         for x in [5, 6, 7, 8, 10, 11] {
-            assert_eq!(buffer[(x, 2)].bg, Color::Blue);
+            assert_eq!(buffer[(x, 2)].bg, theme::SELECTION);
         }
-        assert_eq!(buffer[(4, 3)].bg, Color::Blue); // Selected blank line's newline.
-        assert_eq!(buffer[(4, 4)].bg, Color::Blue); // Selected "l".
-        assert_ne!(buffer[(5, 4)].bg, Color::Blue); // Unselected "a".
+        assert_eq!(buffer[(4, 3)].bg, theme::SELECTION); // Selected blank line's newline.
+        assert_eq!(buffer[(4, 4)].bg, theme::SELECTION); // Selected "l".
+        assert_ne!(buffer[(5, 4)].bg, theme::SELECTION); // Unselected "a".
     }
 
     #[test]
@@ -540,8 +545,8 @@ mod tests {
         let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
         terminal.draw(|f| draw(f, &mut app)).unwrap();
         let buffer = terminal.backend().buffer();
-        assert_eq!(buffer[(8, 3)].bg, Color::Magenta);
-        assert_eq!(buffer[(8, 4)].bg, Color::Magenta);
+        assert_eq!(buffer[(8, 3)].bg, theme::PURPLE);
+        assert_eq!(buffer[(8, 4)].bg, theme::PURPLE);
         assert_eq!(buffer[(8, 3)].symbol(), "e\u{301}");
         app.help = true;
         terminal.draw(|f| draw(f, &mut app)).unwrap();
@@ -551,7 +556,7 @@ mod tests {
                 .buffer()
                 .content
                 .iter()
-                .all(|cell| cell.bg != Color::Magenta)
+                .all(|cell| cell.bg != theme::PURPLE)
         );
     }
 }

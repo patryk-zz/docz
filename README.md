@@ -43,7 +43,7 @@ starting with a dash. The app requires an interactive terminal.
 ## Syntax highlighting
 
 Highlighting is automatic, using Syntect's bundled Sublime syntax definitions
-and the `base16-ocean.dark` theme. Language detection checks the filename or
+and the Gruvbox Dark theme. Language detection checks the filename or
 extension, then the first line for a shebang; unknown files remain plain text.
 Supported bundled languages include Python, Rust, JavaScript, JSON, shell,
 HTML, CSS, C/C++, Markdown, and Makefiles. The status bar shows the detected
@@ -61,6 +61,15 @@ affected checkpoint onward. Parsing stops at the bottom of the viewport, while
 retaining context from preceding lines. A first jump deep into a large file
 still parses the preceding text synchronously and may pause. Theme selection,
 manual language overrides, and language-server features are future work.
+
+## Theme
+
+The entire editor uses [Gruvbox Dark](https://github.com/morhetz/gruvbox) with
+medium contrast: a `#282828` background, warm cream text, and muted accents.
+The file explorer, buffer, gutters, headers, status bars, help, and unsaved-change
+prompts share the same palette. Selections use a lighter brown background;
+secondary cursors use purple. Syntax colors use red keywords, green strings and
+function names, purple constants, aqua built-ins, and gray comments.
 
 ## Controls and modes
 
@@ -135,7 +144,7 @@ Typing, Enter, Tab, Backspace, Delete, and paste apply simultaneously at every
 cursor. Arrow movement, word/paragraph sprint, and Home/End move all cursors;
 coincident cursors merge so text is inserted or deleted only once. Ctrl+Home/End
 converges the cursors at the file boundary. Secondary cursors are highlighted in
-magenta and the status bar shows the count. The viewport shows the whole set
+purple and the status bar shows the count. The viewport shows the whole set
 when it fits; otherwise it keeps the primary cursor visible.
 
 Ctrl+`\` returns to the original primary cursor. Leaving Edit also resets the set.
