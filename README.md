@@ -228,3 +228,8 @@ cargo test
 cargo build --release
 python3 scripts/terminal_smoke.py  # Linux PTY integration check
 ```
+
+## AI assistance disclosure
+
+docz was developed with AI coding assistance ("vibecoding"), including code
+generation, debugging, and tests.
