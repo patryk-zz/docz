@@ -85,14 +85,13 @@ impl Document {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::buffer::Cursor;
 
     #[test]
     fn saves_new_file_and_preserves_original_bytes() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("new.txt");
         let mut doc = Document::open(&path).unwrap();
-        doc.buffer.insert(&mut Cursor::default(), "hello\nworld");
+        doc.buffer.replace_text("hello\nworld");
         doc.refresh_dirty();
         assert!(doc.dirty);
         doc.save().unwrap();

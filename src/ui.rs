@@ -77,7 +77,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 b.entries.len()
             ),
             Screen::Editor(e) => format!(
-                " {} · Ln {}, Col {} · UTF-8 · {} lines{}",
+                " {} · Ln {}, Col {} · UTF-8 · {} lines · {} cursor(s){}",
                 if e.document.dirty {
                     "Modified"
                 } else {
@@ -86,6 +86,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 e.cursor.row + 1,
                 e.cursor.col + 1,
                 e.document.buffer.lines.len(),
+                e.cursors().count(),
                 if e.selection_range().is_some() {
                     if e.mode == Mode::Edit {
                         " · typing replaces selection"
@@ -104,15 +105,17 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     );
     let hint = match &app.screen {
         Screen::Browser(_) => {
-            " W/S: select  Shift: sprint  D/Enter: open  A: parent  Ctrl+Q: quit  F1: help"
+            " W/S: select  Shift: sprint  D/Enter: open  A/Q: parent  Ctrl+Q: quit  F1: help"
         }
         Screen::Editor(e) if e.mode == Mode::Navigate => {
             " WASD: move  Shift: words/paragraphs  E: edit  F: select  Ctrl+S: save  Ctrl+Q: quit  F1: help"
         }
         Screen::Editor(e) if e.mode == Mode::Selection => {
-            " WASD: select  Shift: words/paragraphs  Ctrl+C/X/V: copy/cut/paste  E: edit  Esc: cancel"
+            " WASD: select  Shift: words/paragraphs  Ctrl+C/X/V: copy/cut/paste  E: edit  Q/Esc: cancel"
         }
-        Screen::Editor(_) => " Type to edit  Esc: navigate  Ctrl+S: save  Ctrl+Q: quit  F1: help",
+        Screen::Editor(_) => {
+            " Ctrl+[ / ]: add cursors  Ctrl+\\: one cursor  Quotes/brackets: pair  Esc: navigate  F1: help"
+        }
     };
     frame.render_widget(Paragraph::new(hint).style(Style::default().fg(DIM)), hints);
     if app.help {
@@ -126,7 +129,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             Action::Browse => "opening the file explorer",
         };
         frame.render_widget(Paragraph::new(format!(
-            "You have unsaved changes.\nBefore {verb}:\n\ns: save and continue   d: discard   Esc: cancel"
+            "You have unsaved changes.\nBefore {verb}:\n\ns: save and continue   d: discard   Q/Esc: cancel"
         )).wrap(Wrap { trim: false }).block(Block::bordered().title(" Unsaved changes ")
             .border_style(Style::default().fg(Color::Yellow))), area);
     }
@@ -209,6 +212,16 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &mut Editor, show_cursor: 
     editor.top = editor
         .top
         .min(editor.document.buffer.lines.len().saturating_sub(height));
+    let first = editor.cursors().map(|c| c.row).min().unwrap();
+    let last = editor.cursors().map(|c| c.row).max().unwrap();
+    if last - first < height {
+        if first < editor.top {
+            editor.top = first;
+        }
+        if last >= editor.top + height {
+            editor.top = last + 1 - height;
+        }
+    }
     let line = &editor.document.buffer.lines[editor.cursor.row];
     let byte = editor.document.buffer.byte_at(editor.cursor);
     let cursor_x = display_text(&line[..byte]).width();
@@ -250,6 +263,22 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &mut Editor, show_cursor: 
         }
     }
     if show_cursor {
+        for cursor in editor.cursors().skip(1) {
+            if cursor.row < editor.top || cursor.row >= editor.top + height {
+                continue;
+            }
+            let text = &editor.document.buffer.lines[cursor.row];
+            let byte = editor.document.buffer.byte_at(cursor);
+            let x = display_text(&text[..byte]).width();
+            if x < editor.left || x >= editor.left + width {
+                continue;
+            }
+            frame.buffer_mut()[(
+                inner.x + gutter as u16 + (x - editor.left) as u16,
+                inner.y + (cursor.row - editor.top) as u16,
+            )]
+                .set_style(Style::default().fg(Color::Black).bg(Color::Magenta));
+        }
         frame.set_cursor_position((
             inner.x + gutter as u16 + (cursor_x - editor.left) as u16,
             inner.y + (editor.cursor.row - editor.top) as u16,
@@ -346,24 +375,24 @@ fn draw_help(frame: &mut Frame) {
     let area = popup(frame.area(), 78, 25);
     frame.render_widget(Clear, area);
     let help = "NAVIGATE   WASD / arrows move · E edits · F selects\n\
-        SPRINT     Shift+A/D: word starts · Shift+W/S: paragraph starts\n\
-                   Paragraphs are separated by blank/whitespace lines.\n\n\
-        SELECT     Movement extends selection from a fixed anchor.\n\
-                   Ctrl+C copies and keeps selection.\n\
-                   Ctrl+X cuts and returns to Navigate.\n\
-                   Ctrl+V replaces selection. Backspace/Delete removes it.\n\
-                   E keeps selection; typing then replaces it.\n\
-                   Esc clears selection without changing text.\n\n\
+        SPRINT     Shift+A/D: words · Shift+W/S: paragraphs\n\n\
+        SELECT     Movement extends from the fixed anchor.\n\
+                   Ctrl+C copies · Ctrl+X cuts and returns to Navigate\n\
+                   Ctrl+V replaces selection · Backspace/Delete removes it\n\
+                   E retains selection; first input replaces it.\n\
+                   Q/Esc clears selection without changing text.\n\n\
         EDIT       Type normally · Enter/Tab insert newline/tab\n\
-                   Arrows move · Backspace/Delete remove text\n\
-                   Esc returns to Navigate.\n\n\
+                   Ctrl+[ adds above · Ctrl+] adds below\n\
+                   Ctrl+\\ returns to the primary cursor\n\
+                   Ctrl+Up/Down also add cursors (legacy-terminal fallback).\n\
+                   Quotes/brackets pair; closers skip · Backspace deletes pairs\n\
+                   Esc returns to Navigate; q types normally.\n\n\
         SHARED     Ctrl+Z undo · Ctrl+Shift+Z redo (Ctrl+Y fallback)\n\
                    Ctrl+S save · Ctrl+Q quit · Ctrl+E file explorer\n\
-                   Ctrl+C/X/V copy/cut/paste · Home/End line bounds\n\
-                   Ctrl+Home/End file bounds · PageUp/Down one screen\n\n\
-        EXPLORER   W/S select · Shift moves five entries\n\
-                   D/Enter opens · A/Backspace goes to parent\n\
-        F1 or Esc closes help. Unsaved changes prompt before leaving.";
+                   Home/End line bounds · Ctrl+Home/End file bounds\n\
+                   PageUp/Down one screen\n\n\
+        EXPLORER   W/S selects · D/Enter opens · A/Q/Backspace: parent\n\
+        F1, Q or Esc closes help. Unsaved changes prompt before leaving.";
     frame.render_widget(
         Paragraph::new(help).wrap(Wrap { trim: false }).block(
             Block::bordered()
@@ -431,5 +460,36 @@ mod tests {
         assert_eq!(buffer[(4, 3)].bg, Color::Blue); // Selected blank line's newline.
         assert_eq!(buffer[(4, 4)].bg, Color::Blue); // Selected "l".
         assert_ne!(buffer[(5, 4)].bg, Color::Blue); // Unselected "a".
+    }
+
+    #[test]
+    fn secondary_cursors_are_visible_at_unicode_cell_positions_and_hidden_in_help() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file.txt");
+        std::fs::write(&path, "\t中x\n\te\u{301}x\n\ta").unwrap();
+        let mut app = App::new(Some(&path)).unwrap();
+        let Screen::Editor(e) = &mut app.screen else {
+            panic!()
+        };
+        e.cursor.col = 1;
+        e.enter_edit();
+        e.add_cursor(false);
+        e.add_cursor(false);
+        let mut terminal = Terminal::new(TestBackend::new(40, 10)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let buffer = terminal.backend().buffer();
+        assert_eq!(buffer[(8, 3)].bg, Color::Magenta);
+        assert_eq!(buffer[(8, 4)].bg, Color::Magenta);
+        assert_eq!(buffer[(8, 3)].symbol(), "e\u{301}");
+        app.help = true;
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert!(
+            terminal
+                .backend()
+                .buffer()
+                .content
+                .iter()
+                .all(|cell| cell.bg != Color::Magenta)
+        );
     }
 }

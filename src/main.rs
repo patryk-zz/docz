@@ -34,6 +34,10 @@ const HELP: &str = "docz — a personal modal terminal editor\n\n\
     Use -- before a filename starting with a dash.\n\n\
     Navigate: WASD moves; Shift+A/D jumps words; Shift+W/S jumps paragraphs.\n\
     E enters Edit; F enters Selection; Esc returns to Navigate.\n\
+    Q cancels Selection/help/prompts; q types normally in Edit.\n\
+    In Edit: Ctrl+[ adds above; Ctrl+] below; Ctrl+\\ resets cursors.\n\
+    Quotes/brackets close automatically; typing an existing closer skips it.\n\
+    Ctrl+Up/Down also add cursors (Ctrl+[ may arrive as Esc in older terminals).\n\
     Ctrl+C copies; Ctrl+X cuts; Ctrl+V pastes.\n\
     Ctrl+Z undoes; Ctrl+Shift+Z redoes (Ctrl+Y fallback).\n\
     Ctrl+S saves; Ctrl+Q quits; Ctrl+E opens the explorer; F1 shows help.\n\n\

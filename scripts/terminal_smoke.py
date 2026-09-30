@@ -86,15 +86,89 @@ def main():
         try:
             assert b"EXPLORE" in session.transcript
             session.send(b"sd")  # Select and enter subdirectory.
-            session.send(b"a")   # Back to parent.
+            session.send(b"q")   # Back to parent with the new cancel key.
             session.send(b"ss\r")  # Select and open notes.txt.
             assert b"NAVIGATE" in session.transcript
-            session.send(b"De[ok]")  # Sprint to next word, then edit.
+            session.send(b"De")  # Sprint to next word, then edit.
+            session.send(b"[ok]")  # Auto-pair brackets and skip the existing closer.
             session.send(b"\x1b")
             session.send(b"\x13")  # Ctrl+S.
             session.send(b"\x11")
             session.finish()
             assert notes.read_bytes() == b"abcde [ok]f\r\nsecond\r\n"
+        finally:
+            session.close()
+
+        # Typed pairs nest without duplicate closers; empty-pair Backspace and literal paste.
+        pairs = root / "pairs.txt"
+        session = Session(binary, root, "pairs.txt")
+        try:
+            session.send('e({["中"]})'.encode())
+            session.send(b"{\x7f")  # Insert an empty pair, then delete both symbols.
+            session.send(b' "say \\"hi\\""')  # Escaped quotes insert literally.
+            session.send(b'\x1b[200~(["{\x1b[201~')
+            session.send(b"\x13\x11")
+            session.finish()
+            assert pairs.read_text() == '({["中"]}) "say \\"hi\\""(["{'
+        finally:
+            session.close()
+
+        # Each cursor independently chooses between quote pairing and skipping.
+        pairs.write_bytes(b'"\r\nx\r\n"')
+        session = Session(binary, root, "pairs.txt", enhanced=True)
+        try:
+            session.send(b'se\x1b[91;5u\x1b[93;5u"X')
+            session.send(b"\x13\x11")
+            session.finish()
+            assert pairs.read_bytes() == b'"X\r\n"X"x\r\n"X'
+        finally:
+            session.close()
+
+        # Q cancels Selection/help/confirmation, while q remains ordinary Edit text.
+        cancel_file = root / "cancel.txt"
+        cancel_file.write_text("hello world")
+        session = Session(binary, root, "cancel.txt")
+        try:
+            session.send(b"fDq")
+            session.send(b"\x1bOP")  # F1 opens help.
+            session.send(b"q")
+            session.send(b"eqq")
+            session.send(b"\x11")
+            session.send(b"q")  # Cancel the unsaved-change prompt.
+            assert session.process.poll() is None
+            session.send(b"\x13\x11")
+            session.finish()
+            assert cancel_file.read_text() == "hello qqworld"
+        finally:
+            session.close()
+
+        # Cursors above and below a middle primary cursor; multiline edits, reset, undo/redo.
+        multi = root / "multi.txt"
+        multi.write_bytes(b"ab\r\ncd\r\nef")
+        session = Session(binary, root, "multi.txt", enhanced=True)
+        try:
+            session.send(b"sde\x1b[91;5u\x1b[93;5uX")  # Enhanced Ctrl+[ and Ctrl+].
+            session.send(b"\x7f")  # Remove X at all three cursors.
+            session.send(b"\rq")   # Insert a newline and q at each cursor.
+            session.send(b"\x1b[92;5u!")  # Enhanced Ctrl+\\ resets; type only at primary.
+            session.send(b"\x1a\x1a")  # Undo the single and multiple cursor edits.
+            session.send(b"\x19\x19")  # Redo both.
+            session.send(b"\x13\x11")
+            session.finish()
+            assert multi.read_bytes() == b"a\r\nqb\r\nc\r\nq!d\r\ne\r\nqf"
+        finally:
+            session.close()
+
+        # Legacy Ctrl+] / Ctrl+\ and Ctrl+Up fallback; plain symbols remain text.
+        multi.write_text("a\nb\nc")
+        session = Session(binary, root, "multi.txt")
+        try:
+            session.send(b"se\x1b[1;5A\x1d")  # Ctrl+Up and legacy Ctrl+].
+            session.send(b"[]\\")  # Literal symbols at all three cursors.
+            session.send(b"\x1c!")  # Legacy Ctrl+\ resets to the middle primary.
+            session.send(b"\x13\x11")
+            session.finish()
+            assert multi.read_text() == "[]\\a\n[]\\!b\n[]\\c"
         finally:
             session.close()
 
@@ -202,6 +276,8 @@ else:
     print("      CRLF save, new file, Unicode paste, undo/redo, cancel/save/discard,")
     print("      anchored selection, E replacement, word/paragraph jumps, copy/cut/paste,")
     print("      private desktop clipboard helpers, enhanced redo, CLI, and terminal restoration.")
+    print("      Q cancellation, literal keys, multicursor insertion/deletion/newlines/reset/undo.")
+    print("      Automatic pairs, closer skipping, escaped quotes, empty-pair deletion, literal paste.")
 
 
 if __name__ == "__main__":

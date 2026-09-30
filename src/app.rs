@@ -59,14 +59,14 @@ impl App {
 
     fn key(&mut self, key: KeyEvent) {
         if self.help {
-            if matches!(key.code, KeyCode::Esc | KeyCode::F(1)) {
+            if matches!(key.code, KeyCode::Esc | KeyCode::F(1) | KeyCode::Char('q')) {
                 self.help = false;
             }
             return;
         }
         if let Some(action) = self.confirmation {
             match key.code {
-                KeyCode::Esc => {
+                KeyCode::Esc | KeyCode::Char('q') => {
                     self.confirmation = None;
                     self.message.clear();
                 }
@@ -109,6 +109,22 @@ impl App {
                 KeyCode::Char('x') => self.copy(true),
                 KeyCode::Char('v') => self.paste(),
                 KeyCode::Char('e') => self.request(Action::Browse),
+                KeyCode::Char('[' | ']' | '5') | KeyCode::Up | KeyCode::Down => {
+                    if let Screen::Editor(editor) = &mut self.screen
+                        && editor.mode == Mode::Edit
+                        && !editor.add_cursor(matches!(code, KeyCode::Char('[') | KeyCode::Up))
+                    {
+                        self.message = "No line in that direction".into();
+                    }
+                }
+                // Crossterm decodes legacy Ctrl+\ as Ctrl+4, and Ctrl+] as Ctrl+5.
+                KeyCode::Char('\\' | '4') => {
+                    if let Screen::Editor(editor) = &mut self.screen
+                        && editor.mode == Mode::Edit
+                    {
+                        editor.reset_cursors();
+                    }
+                }
                 KeyCode::Char('z' | 'y') => {
                     if let Screen::Editor(editor) = &mut self.screen {
                         let redo = code == KeyCode::Char('y')
@@ -151,7 +167,7 @@ impl App {
                 }
                 match key.code {
                     KeyCode::Enter => self.open_selected(),
-                    KeyCode::Backspace => {
+                    KeyCode::Backspace | KeyCode::Char('q') => {
                         if let Err(e) = browser.parent() {
                             self.message = format!("{e:#}");
                         }
@@ -178,7 +194,7 @@ impl App {
                     KeyCode::PageDown => editor.move_cursor(Direction::Down, editor.page_height),
                     KeyCode::Esc => editor.navigate(),
                     _ if editor.mode == Mode::Edit => match key.code {
-                        KeyCode::Char(c) => editor.insert_text(&c.to_string()),
+                        KeyCode::Char(c) => editor.type_char(c),
                         KeyCode::Enter => editor.insert_text("\n"),
                         KeyCode::Tab => editor.insert_text("\t"),
                         KeyCode::Backspace => editor.remove_text(true),
@@ -187,6 +203,7 @@ impl App {
                     },
                     KeyCode::Char('e') => editor.enter_edit(),
                     KeyCode::Char('f') => editor.enter_selection(),
+                    KeyCode::Char('q') => editor.navigate(),
                     KeyCode::Delete => editor.remove_text(false),
                     KeyCode::Backspace if editor.mode == Mode::Selection => {
                         editor.remove_text(true)
@@ -476,5 +493,106 @@ mod tests {
         app.handle(Event::Paste("paste\ntext".into()));
         assert_eq!(editor(&app).document.buffer.text(), "paste\ntext");
         assert_eq!(editor(&app).mode, Mode::Edit);
+    }
+
+    #[test]
+    fn q_cancels_selection_help_and_prompts_but_types_in_edit() {
+        let (_dir, mut app) = app("abc");
+        app.handle(key('f', KeyModifiers::NONE));
+        app.handle(key('d', KeyModifiers::NONE));
+        app.handle(key('q', KeyModifiers::NONE));
+        assert_eq!(editor(&app).mode, Mode::Navigate);
+        assert!(editor(&app).anchor.is_none());
+        app.handle(Event::Key(KeyEvent::new(KeyCode::F(1), KeyModifiers::NONE)));
+        app.handle(key('q', KeyModifiers::NONE));
+        assert!(!app.help);
+        app.handle(key('e', KeyModifiers::NONE));
+        app.handle(key('q', KeyModifiers::NONE));
+        assert_eq!(editor(&app).document.buffer.text(), "aqbc");
+        app.handle(key('q', KeyModifiers::CONTROL));
+        assert!(app.confirmation.is_some());
+        app.handle(key('q', KeyModifiers::NONE));
+        assert!(app.confirmation.is_none());
+        assert!(app.running);
+        assert_eq!(editor(&app).mode, Mode::Edit);
+    }
+
+    #[test]
+    fn ctrl_cursor_keys_and_plain_literals_work_through_input_handler() {
+        let (_dir, mut app) = app("ab\ncd\nef");
+        app.handle(key('e', KeyModifiers::NONE));
+        app.handle(key(']', KeyModifiers::CONTROL));
+        app.handle(key(']', KeyModifiers::CONTROL));
+        assert_eq!(editor(&app).cursors().count(), 3);
+        app.handle(key('q', KeyModifiers::NONE));
+        assert_eq!(editor(&app).document.buffer.text(), "qab\nqcd\nqef");
+        for c in ['[', ']', '\\'] {
+            app.handle(key(c, KeyModifiers::NONE));
+        }
+        assert_eq!(
+            editor(&app).document.buffer.text(),
+            "q[]\\ab\nq[]\\cd\nq[]\\ef"
+        );
+        assert_eq!(editor(&app).cursors().count(), 3);
+        app.handle(key('\\', KeyModifiers::CONTROL));
+        assert_eq!(editor(&app).cursors().count(), 1);
+        app.handle(key('X', KeyModifiers::NONE));
+        assert_eq!(
+            editor(&app).document.buffer.text(),
+            "q[]\\Xab\nq[]\\cd\nq[]\\ef"
+        );
+        app.handle(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        assert_eq!(editor(&app).mode, Mode::Navigate);
+    }
+
+    #[test]
+    fn q_goes_to_parent_in_explorer_without_quitting() {
+        let dir = tempfile::tempdir().unwrap();
+        let child = dir.path().join("child");
+        std::fs::create_dir(&child).unwrap();
+        let mut app = App::new(Some(&child)).unwrap();
+        app.handle(key('q', KeyModifiers::NONE));
+        let Screen::Browser(browser) = &app.screen else {
+            panic!()
+        };
+        assert_eq!(
+            browser.directory,
+            std::fs::canonicalize(dir.path()).unwrap()
+        );
+        assert!(app.running);
+    }
+
+    #[test]
+    fn plain_symbols_insert_in_edit_and_do_not_change_cursor_count() {
+        let (_dir, mut app) = app("abc\ndef");
+        app.handle(key('e', KeyModifiers::NONE));
+        for c in ['[', ']', '\\'] {
+            app.handle(key(c, KeyModifiers::NONE));
+        }
+        assert_eq!(editor(&app).document.buffer.text(), "[]\\abc\ndef");
+        assert_eq!(editor(&app).cursors().count(), 1);
+        assert_eq!(editor(&app).mode, Mode::Edit);
+    }
+
+    #[test]
+    fn ctrl_brackets_legacy_encodings_and_arrow_fallbacks_are_edit_only() {
+        let (_dir, mut app) = app("abc\ndef\nghi");
+        app.handle(key(']', KeyModifiers::CONTROL));
+        assert_eq!(editor(&app).cursors().count(), 1);
+        app.handle(key('s', KeyModifiers::NONE));
+        app.handle(key('e', KeyModifiers::NONE));
+        app.handle(key('[', KeyModifiers::CONTROL));
+        app.handle(key('5', KeyModifiers::CONTROL));
+        assert_eq!(editor(&app).cursors().count(), 3);
+        assert_eq!(editor(&app).document.buffer.text(), "abc\ndef\nghi");
+        app.handle(key('4', KeyModifiers::CONTROL));
+        assert_eq!(editor(&app).cursors().count(), 1);
+        for code in [KeyCode::Up, KeyCode::Down] {
+            app.handle(Event::Key(KeyEvent::new(code, KeyModifiers::CONTROL)));
+        }
+        assert_eq!(editor(&app).cursors().count(), 3);
+        app.handle(Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
+        assert_eq!(editor(&app).mode, Mode::Navigate);
+        assert_eq!(editor(&app).cursors().count(), 1);
     }
 }

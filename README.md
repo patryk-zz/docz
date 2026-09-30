@@ -35,7 +35,9 @@ starting with a dash. The app requires an interactive terminal.
 ## Controls and modes
 
 Letter keys below use lowercase unless Shift is specified. The editor starts in
-Navigate mode. E enters Edit; F enters Selection; Esc returns to Navigate.
+Navigate mode. E enters Edit; F enters Selection; Q cancels Selection, help,
+and confirmation prompts. Esc returns from Edit to Navigate; q types normally
+in Edit. Ctrl+Q remains the quit shortcut.
 
 | Context | Key | Action |
 | --- | --- | --- |
@@ -46,9 +48,15 @@ Navigate mode. E enters Edit; F enters Selection; Esc returns to Navigate.
 | Navigate | F | Enter Selection at the cursor |
 | Edit | Ordinary keys | Type text; WASD, E, and F insert letters |
 | Edit | Enter / Tab | Insert newline / literal tab (four-column display stops) |
-| Edit | Arrows | Move cursor; Shift jumps words / paragraphs |
+| Edit | Arrows | Move all cursors; Shift jumps words / paragraphs |
+| Edit | Ctrl+`[` / Ctrl+`]` | Add a cursor above / below the existing cursor set |
+| Edit | Ctrl+Up / Ctrl+Down | Alternate cursor-above / cursor-below bindings |
+| Edit | Ctrl+`\` | Reset to the original primary cursor |
+| Edit | `"`, `(`, `[`, `{` | Insert a matching pair, with the cursor inside |
+| Edit | `"`, `)`, `]`, `}` | Skip the same closing symbol under the cursor |
 | Edit / Selection | Backspace / Delete | Remove selected text, otherwise edit individual characters in Edit |
 | Navigate | Delete / Backspace | Delete at cursor / move left |
+| Selection | Q | Cancel selection and return to Navigate |
 | Editor | Esc | Clear selection without editing text, return to Navigate |
 | Editor | Home / End | Start / end of line |
 | Editor | Ctrl+Home / Ctrl+End | Start / end of file |
@@ -62,14 +70,14 @@ Navigate mode. E enters Edit; F enters Selection; Esc returns to Navigate.
 | Editor | Ctrl+S | Save |
 | Editor | Ctrl+E | Open explorer in the current file's directory |
 | Everywhere | Ctrl+Q | Quit |
-| Everywhere | F1 | Show help (F1 / Esc closes it) |
+| Everywhere | F1 | Show help (F1 / Q / Esc closes it) |
 | Explorer | W / S or Up / Down | Select entry |
 | Explorer | Shift+W / Shift+S | Move five entries |
 | Explorer | D / Enter / Right | Open file or directory |
-| Explorer | A / Backspace / Left | Parent directory |
+| Explorer | A / Q / Backspace / Left | Parent directory |
 | Explorer | Home / End | First / last entry |
 | Explorer | Esc | Quit |
-| Unsaved prompt | S / D / Esc | Save and continue / discard / cancel |
+| Unsaved prompt | S / D / Q or Esc | Save and continue / discard / cancel |
 
 ### Selection
 
@@ -84,6 +92,47 @@ this pending replacement. Moving the cursor in Edit also clears the pending
 selection without changing text. Backspace/Delete removes the selection once,
 without removing an additional character. Copy/cut with no nonempty selection
 does nothing and displays a status message.
+
+### Multiple cursors
+
+In Edit, Ctrl+`[` adds a cursor above the highest cursor and Ctrl+`]` adds one below the
+lowest. Repeating the key extends the set one line at a time, stopping at file
+boundaries. New cursors use the primary cursor's grapheme column, clamped to the
+end of shorter lines; extending past a short line retains the original column.
+Adding cursors clears any pending selection without deleting its text.
+
+Typing, Enter, Tab, Backspace, Delete, and paste apply simultaneously at every
+cursor. Arrow movement, word/paragraph sprint, and Home/End move all cursors;
+coincident cursors merge so text is inserted or deleted only once. Ctrl+Home/End
+converges the cursors at the file boundary. Secondary cursors are highlighted in
+magenta and the status bar shows the count. The viewport shows the whole set
+when it fits; otherwise it keeps the primary cursor visible.
+
+Ctrl+`\` returns to the original primary cursor. Leaving Edit also resets the set.
+Undo/redo groups edits across all cursors; while in Edit, it also restores their
+positions. Changing the cursor set starts a new undo group. Clipboard paste
+repeats the whole clipboard at each cursor, including any newlines.
+
+Unmodified brackets insert text with automatic pairing; `\` types normally.
+No literal-entry prefix is needed. Bracketed terminal paste inserts its contents
+literally.
+
+Ctrl+`[` requires a terminal that distinguishes it from Esc (enhanced keyboard
+reporting is enabled automatically where supported). In legacy terminals it
+arrives as Esc and cancels Edit; use Ctrl+Up to add above instead. Ctrl+Down
+also adds below. Ctrl+`]` and Ctrl+`\` support their legacy terminal encodings.
+
+### Automatic pairs
+
+Typing `"`, `(`, `[`, or `{` inserts `""`, `()`, `[]`, or `{}` and places the cursor
+between the symbols. Typing a closing symbol already under the cursor moves past
+it, so typing a complete expression does not duplicate closers. This also works
+with existing text and independently at each cursor. Backspace between an empty
+pair removes both symbols. A quote preceded by an odd number of backslashes types
+literally, allowing escaped quotes inside strings.
+
+Typing an opener over a selection replaces it with an empty pair. Clipboard and
+bracketed terminal paste always insert their exact contents without adding pairs.
 
 ### Movement
 
@@ -114,7 +163,7 @@ rather than quitting, and plain Q no longer quits the editor.
 ## Current scope
 
 - Directory browser with directories first, hidden files, and navigation into folders.
-- One UTF-8 file at a time; Navigate/Edit/Selection modes, scrolling, line numbers and status.
+- One UTF-8 file at a time; Navigate/Edit/Selection modes, multiple cursors, scrolling, line numbers and status.
 - Undo grouped by Edit session, with cut/paste as separate steps and up to 100 whole-buffer snapshots.
 - Saves use a temporary file in the same directory followed by replacement, preserve
   existing permissions and original line endings, and refuse detected external changes.
