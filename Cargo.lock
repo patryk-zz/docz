@@ -168,6 +168,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "crossterm",
+ "libc",
  "ratatui",
  "syntect",
  "tempfile",

@@ -285,10 +285,64 @@ else:
         finally:
             session.close()
 
+        # Startup diagnostics must never forward a filename's terminal controls.
+        osc52 = b"\x1b]52;c;ZG9jei1hdWRpdA==\x07"
+        hostile = root / ("hostile-" + osc52.decode() + ".txt")
+        hostile.write_bytes(b"\xff")
+        session = Session(binary, root, hostile.name)
+        try:
+            session.process.wait(timeout=3)
+            session.drain()
+            assert session.process.returncode != 0
+            assert osc52 not in session.transcript, "Filename injected terminal controls"
+            assert b"\\u{1b}]52;" in session.transcript, "Filename controls were not escaped"
+            assert termios.tcgetattr(session.slave) == session.before
+        finally:
+            session.close()
+
+        # Nonblocking type validation rejects an initial FIFO before reading it.
+        fifo = root / "initial-fifo"
+        os.mkfifo(fifo)
+        session = Session(binary, root, fifo.name)
+        try:
+            session.process.wait(timeout=3)
+            session.drain()
+            assert session.process.returncode != 0
+            assert b"not a regular file" in session.transcript
+            assert termios.tcgetattr(session.slave) == session.before
+        finally:
+            session.close()
+
+        # A FIFO substituted before save must not block either existing or new files.
+        for existing in [True, False]:
+            path = root / f"save-fifo-{existing}.txt"
+            if existing:
+                path.write_text("original")
+            session = Session(binary, root, path.name)
+            try:
+                session.send(b"eX")
+                if existing:
+                    path.unlink()
+                os.mkfifo(path)
+                session.send(b"\x13")
+                # Ratatui writes only changed cells, so status text need not be
+                # contiguous in the PTY stream. Check failure through behavior:
+                # unsaved changes remain, quit works, and the FIFO survives.
+                session.send(b"\x11")
+                assert b"Unsaved changes" in session.transcript
+                session.send(b"d")
+                session.finish()
+                assert path.is_fifo(), "Rejected save replaced the FIFO"
+            finally:
+                session.close()
+
     for option in ["--help", "--version"]:
         subprocess.run([str(binary), option], check=True, capture_output=True)
     result = subprocess.run([str(binary), "--unknown"], capture_output=True)
     assert result.returncode != 0
+    result = subprocess.run([str(binary), "--bad-" + osc52.decode()], capture_output=True)
+    assert result.returncode != 0
+    assert osc52 not in result.stderr, "Command-line error injected terminal controls"
     print("PASS: no-argument explorer, folder navigation, file opening, sprint, editing,")
     print("      CRLF save, new file, Unicode paste, undo/redo, cancel/save/discard,")
     print("      anchored selection, E replacement, word/paragraph jumps, copy/cut/paste,")
@@ -296,6 +350,7 @@ else:
     print("      Q cancellation, literal keys, multicursor insertion/deletion/newlines/reset/undo.")
     print("      Automatic pairs, closer skipping, escaped quotes, empty-pair deletion, literal paste.")
     print("      Python syntax colors, multiline viewport context, edit/undo/redo and CRLF preservation.")
+    print("      Escaped hostile diagnostics, FIFO open/save rejection, and responsive quit after save errors.")
 
 
 if __name__ == "__main__":

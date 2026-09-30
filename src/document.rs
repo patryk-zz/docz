@@ -2,9 +2,36 @@ use crate::buffer::Buffer;
 use anyhow::{Context, Result, bail};
 use std::{
     fs,
-    io::Write,
+    io::{Read, Write},
     path::{Path, PathBuf},
 };
+
+/// Open once, then inspect and read that same object. Nonblocking opens prevent
+/// a substituted FIFO from hanging before we can reject its file type.
+fn read_regular_file(path: &Path) -> Result<Option<(String, fs::Permissions)>> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        // Document::open resolves existing symlinks first. Reject a replacement
+        // symlink rather than following a different target during validation.
+        options.custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW);
+    }
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error).context("Cannot open file for reading"),
+    };
+    let metadata = file.metadata().context("Cannot inspect opened file")?;
+    if !metadata.is_file() {
+        bail!("{} is not a regular file", path.display());
+    }
+    let mut text = String::new();
+    file.read_to_string(&mut text)
+        .with_context(|| format!("Cannot read {} as UTF-8 text", path.display()))?;
+    Ok(Some((text, metadata.permissions())))
+}
 
 pub struct Document {
     pub path: PathBuf,
@@ -20,19 +47,7 @@ impl Document {
         } else {
             std::env::current_dir()?.join(path)
         };
-        let original = match fs::metadata(&path) {
-            Ok(meta) => {
-                if !meta.is_file() {
-                    bail!("{} is not a regular file", path.display());
-                }
-                Some(
-                    fs::read_to_string(&path)
-                        .with_context(|| format!("Cannot read {} as UTF-8 text", path.display()))?,
-                )
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(e).context("Cannot inspect file"),
-        };
+        let original = read_regular_file(&path)?.map(|(text, _)| text);
         let buffer = Buffer::from_text(original.as_deref().unwrap_or(""));
         Ok(Self {
             path,
@@ -48,20 +63,15 @@ impl Document {
 
     pub fn save(&mut self) -> Result<()> {
         // Refuse to overwrite a file changed by another program since opening/saving.
-        let disk = match fs::read_to_string(&self.path) {
-            Ok(text) => Some(text),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => return Err(e).context("Cannot check file before saving"),
-        };
-        if disk != self.original {
+        let disk = read_regular_file(&self.path).context("Cannot check file before saving")?;
+        if disk.as_ref().map(|(text, _)| text) != self.original.as_ref() {
             bail!("File changed on disk; reopen it before saving");
         }
         let parent = self.path.parent().context("File has no parent directory")?;
         let mut temp =
             tempfile::NamedTempFile::new_in(parent).context("Cannot create save file")?;
-        if self.original.is_some() {
-            temp.as_file()
-                .set_permissions(fs::metadata(&self.path)?.permissions())?;
+        if let Some((_, permissions)) = disk {
+            temp.as_file().set_permissions(permissions)?;
         }
         let text = self.buffer.text();
         temp.write_all(text.as_bytes())
@@ -121,5 +131,46 @@ mod tests {
         let path = dir.path().join("binary");
         fs::write(&path, [0xff, 0xfe]).unwrap();
         assert!(Document::open(&path).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn existing_symlinks_edit_the_target_but_save_rejects_replacement_symlinks() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.txt");
+        let link = dir.path().join("link.txt");
+        fs::write(&target, "original").unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o640)).unwrap();
+        symlink(&target, &link).unwrap();
+        let mut doc = Document::open(&link).unwrap();
+        doc.buffer.replace_text("edited");
+        doc.save().unwrap();
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read_to_string(&target).unwrap(), "edited");
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+
+        let replacement = dir.path().join("replacement.txt");
+        fs::write(&replacement, "edited").unwrap();
+        fs::remove_file(&target).unwrap();
+        symlink(&replacement, &target).unwrap();
+        doc.buffer.replace_text("must not save");
+        assert!(doc.save().is_err());
+        assert!(
+            fs::symlink_metadata(&target)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(fs::read_to_string(&replacement).unwrap(), "edited");
     }
 }

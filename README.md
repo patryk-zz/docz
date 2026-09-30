@@ -208,6 +208,9 @@ rather than quitting, and plain Q no longer quits the editor.
   existing permissions and original line endings, and refuse detected external changes.
 - Existing symlinks resolve to their target before editing. Atomic replacement changes
   inode identity; hard-link relationships and extended metadata are not preserved.
+- On Unix, opening and save validation reject non-regular files without blocking on
+  FIFOs, and save validation rejects substituted symlinks. Diagnostic output escapes
+  terminal controls in filenames and arguments.
 - Save/discard/cancel before quitting or opening the explorer with unsaved changes.
 - Terminal cleanup on normal exit, errors, and Rust panics.
 

@@ -166,9 +166,25 @@ fn run() -> Result<()> {
     Ok(())
 }
 
+fn diagnostic_text(text: &str) -> String {
+    let mut safe = String::new();
+    for character in text.chars() {
+        if character.is_control() && character != '\n' {
+            safe.extend(character.escape_default());
+        } else {
+            safe.push(character);
+        }
+    }
+    safe
+}
+
 fn main() {
     if let Err(error) = run() {
-        eprintln!("{}: {error:#}", program_name());
+        eprintln!(
+            "{}: {}",
+            program_name(),
+            diagnostic_text(&format!("{error:#}"))
+        );
         std::process::exit(1);
     }
 }
@@ -176,6 +192,20 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn diagnostics_escape_terminal_controls_and_keep_readable_lines() {
+        let hostile = "file\x1b]52;c;c2VjcmV0\x07\r\t\u{009b}31m\nUnicode é中";
+        let safe = diagnostic_text(hostile);
+        assert!(!safe.chars().any(|c| c.is_control() && c != '\n'));
+        assert!(safe.contains("\\u{1b}]52;c;c2VjcmV0\\u{7}"));
+        assert!(safe.contains("\\r\\t\\u{9b}31m\nUnicode é中"));
+        let error = parse_args([format!("--{hostile}").into()]).err().unwrap();
+        let diagnostic = diagnostic_text(&format!("{error:#}"));
+        assert!(!diagnostic.contains('\x1b'));
+        assert!(diagnostic.ends_with("\nUse docz --help for usage"));
+    }
+
     #[test]
     fn cli_accepts_optional_paths_and_literal_dashes() {
         assert!(matches!(
