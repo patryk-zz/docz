@@ -11,19 +11,27 @@ cargo run -- notes.txt       # edit a file (create it on save if it doesn't exis
 cargo run -- path/to/folder  # browse another directory
 ```
 
-The development build is installed as `~/.local/bin/docz`, so you can run:
+The stable build is installed as `~/.local/bin/docz`, so you can run:
 
 ```sh
 docz
 docz notes.txt
 ```
 
-To rebuild and update that installation on this system:
+The `codex/syntax-highlighting` development branch is installed separately as
+`~/.local/bin/docz-dev`:
+
+```sh
+docz-dev
+docz-dev script.py
+```
+
+To rebuild and update the development installation from this branch:
 
 ```sh
 cargo build --release --locked
 mkdir -p "$HOME/.local/bin"
-install -m 755 target/release/docz "$HOME/.local/bin/docz"
+install -m 755 target/release/docz "$HOME/.local/bin/docz-dev"
 ```
 
 `~/.local/bin` is already on your PATH. Alternatively, `cargo install --path .`
@@ -31,6 +39,28 @@ installs into Cargo's binary directory (usually `~/.cargo/bin`), which must be o
 your PATH if you use that method.
 Use `docz --help` for command-line help; `docz -- -filename` handles filenames
 starting with a dash. The app requires an interactive terminal.
+
+## Syntax highlighting
+
+Highlighting is automatic, using Syntect's bundled Sublime syntax definitions
+and the `base16-ocean.dark` theme. Language detection checks the filename or
+extension, then the first line for a shebang; unknown files remain plain text.
+Supported bundled languages include Python, Rust, JavaScript, JSON, shell,
+HTML, CSS, C/C++, Markdown, and Makefiles. The status bar shows the detected
+language when no transient message is active.
+
+Python highlighting handles multiline triple-quoted strings, f-string
+expressions, comments, and incomplete code while editing. Syntax colors are
+applied before selection and secondary-cursor highlights, preserving their
+contrast. Tabs, Unicode graphemes, and horizontal scrolling retain their usual
+layout. Highlighting does not change saved text or line endings.
+
+Colored spans are cached, with parser checkpoints every 64 lines. Cursor
+movement reuses cached colors; edits, paste, undo, and redo invalidate from the
+affected checkpoint onward. Parsing stops at the bottom of the viewport, while
+retaining context from preceding lines. A first jump deep into a large file
+still parses the preceding text synchronously and may pause. Theme selection,
+manual language overrides, and language-server features are future work.
 
 ## Controls and modes
 
@@ -163,7 +193,7 @@ rather than quitting, and plain Q no longer quits the editor.
 ## Current scope
 
 - Directory browser with directories first, hidden files, and navigation into folders.
-- One UTF-8 file at a time; Navigate/Edit/Selection modes, multiple cursors, scrolling, line numbers and status.
+- One UTF-8 file at a time; Navigate/Edit/Selection modes, multiple cursors, syntax highlighting, scrolling, line numbers and status.
 - Undo grouped by Edit session, with cut/paste as separate steps and up to 100 whole-buffer snapshots.
 - Saves use a temporary file in the same directory followed by replacement, preserve
   existing permissions and original line endings, and refuse detected external changes.
@@ -174,7 +204,7 @@ rather than quitting, and plain Q no longer quits the editor.
 
 This version keeps text in memory and clones buffers for undo. It targets ordinary
 personal text files; a rope and edit-based history can follow if large-file editing
-becomes a requirement. Syntax highlighting, search,
+becomes a requirement. Search,
 multiple buffers, configuration and scripting are not implemented yet.
 
 ## Development

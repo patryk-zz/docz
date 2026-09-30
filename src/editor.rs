@@ -2,6 +2,7 @@ use crate::{
     buffer::{Buffer, Cursor},
     document::Document,
     input::Direction,
+    syntax::HighlightCache,
 };
 use anyhow::Result;
 use std::collections::BTreeSet;
@@ -42,6 +43,7 @@ pub struct Editor {
     pub top: usize,
     pub left: usize,
     pub page_height: usize,
+    pub highlighting: HighlightCache,
     extra_cursors: Vec<Caret>,
     goal_col: Option<usize>,
     add_col: Option<usize>,
@@ -52,8 +54,10 @@ pub struct Editor {
 
 impl Editor {
     pub fn new(document: Document) -> Self {
+        let highlighting = HighlightCache::new(&document.path, &document.buffer);
         Self {
             document,
+            highlighting,
             cursor: Cursor::default(),
             mode: Mode::Navigate,
             anchor: None,
@@ -294,6 +298,10 @@ impl Editor {
                 .map(|c| (self.document.buffer.offset(c), 0))
                 .collect()
         });
+        if let Some(change) = merged.first() {
+            let row = self.document.buffer.cursor_at_offset(change.start).row;
+            self.highlighting.invalidate_from(row);
+        }
         let mut text = self.document.buffer.text();
         for change in merged.iter().rev() {
             text.replace_range(change.start..change.end, &change.text);
@@ -465,6 +473,25 @@ impl Editor {
         }
     }
     fn restore(&mut self, snapshot: Snapshot) {
+        if let Some(row) = self
+            .document
+            .buffer
+            .lines
+            .iter()
+            .zip(&snapshot.buffer.lines)
+            .position(|(before, after)| before != after)
+            .or_else(|| {
+                (self.document.buffer.lines.len() != snapshot.buffer.lines.len()).then_some(
+                    self.document
+                        .buffer
+                        .lines
+                        .len()
+                        .min(snapshot.buffer.lines.len()),
+                )
+            })
+        {
+            self.highlighting.invalidate_from(row);
+        }
         self.document.buffer = snapshot.buffer;
         self.cursor = snapshot.cursor;
         self.extra_cursors = if self.mode == Mode::Edit {
@@ -580,6 +607,43 @@ mod tests {
         let path = dir.path().join("file.txt");
         std::fs::write(&path, text).unwrap();
         (dir, Editor::new(Document::open(&path).unwrap()))
+    }
+
+    #[test]
+    fn highlighting_tracks_multicursor_edits_paste_undo_and_redo() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file.py");
+        std::fs::write(&path, "\"\"\"docs\ninside\n\"\"\"\nreturn 42").unwrap();
+        let mut e = Editor::new(Document::open(&path).unwrap());
+        fn assert_fresh(e: &mut Editor) {
+            let buffer = &e.document.buffer;
+            e.highlighting.ensure(buffer, buffer.lines.len());
+            let mut fresh = HighlightCache::new(&e.document.path, buffer);
+            fresh.ensure(buffer, buffer.lines.len());
+            for row in 0..buffer.lines.len() {
+                assert_eq!(e.highlighting.line(row), fresh.line(row), "row {row}");
+            }
+        }
+        assert_fresh(&mut e);
+        e.enter_edit();
+        e.add_cursor(false);
+        e.type_char('#');
+        assert_fresh(&mut e);
+        e.paste("\"\"\"\nnew line\n");
+        assert_fresh(&mut e);
+        assert!(e.undo());
+        assert_fresh(&mut e);
+        assert!(e.undo());
+        assert_fresh(&mut e);
+        assert!(e.redo());
+        assert_fresh(&mut e);
+        assert!(e.redo());
+        assert_fresh(&mut e);
+        e.save().unwrap();
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            e.document.buffer.text()
+        );
     }
 
     #[test]

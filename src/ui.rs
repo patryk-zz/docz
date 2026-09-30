@@ -3,6 +3,7 @@ use crate::{
     browser::Browser,
     buffer::Cursor,
     editor::{Editor, Mode},
+    syntax::SyntaxSpan,
 };
 use ratatui::{
     Frame,
@@ -48,7 +49,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
     frame.render_widget(
         Paragraph::new(Line::from(vec![
             Span::styled(
-                " docz ",
+                format!(" {} ", crate::program_name()),
                 Style::default()
                     .fg(Color::Black)
                     .bg(ACCENT)
@@ -77,7 +78,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 b.entries.len()
             ),
             Screen::Editor(e) => format!(
-                " {} · Ln {}, Col {} · UTF-8 · {} lines · {} cursor(s){}",
+                " {} · Ln {}, Col {} · {} · UTF-8 · {} lines · {} cursor(s){}",
                 if e.document.dirty {
                     "Modified"
                 } else {
@@ -85,6 +86,7 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
                 },
                 e.cursor.row + 1,
                 e.cursor.col + 1,
+                e.highlighting.language(),
                 e.document.buffer.lines.len(),
                 e.cursors().count(),
                 if e.selection_range().is_some() {
@@ -231,6 +233,9 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &mut Editor, show_cursor: 
     if cursor_x >= editor.left + width {
         editor.left = cursor_x + 1 - width;
     }
+    editor
+        .highlighting
+        .ensure(&editor.document.buffer, editor.top + height);
     for offset in 0..height {
         let row = editor.top + offset;
         let y = inner.y + offset as u16;
@@ -252,6 +257,7 @@ fn draw_editor(frame: &mut Frame, area: Rect, editor: &mut Editor, show_cursor: 
                     editor.selection_range(),
                     editor.left,
                     width,
+                    editor.highlighting.line(row),
                 )),
                 Rect::new(inner.x + gutter as u16, y, width as u16, 1),
             );
@@ -316,11 +322,14 @@ fn selected_line(
     selection: Option<(Cursor, Cursor)>,
     left: usize,
     width: usize,
+    syntax: &[SyntaxSpan],
 ) -> Line<'static> {
     let mut spans = Vec::new();
     let mut column = 0;
     let right = left + width;
     let graphemes = text.graphemes(true).collect::<Vec<_>>();
+    let mut byte = 0;
+    let mut token = 0;
     for (col, grapheme) in graphemes
         .iter()
         .copied()
@@ -351,11 +360,18 @@ fn selected_line(
             let style = if selected {
                 Style::default().bg(Color::Blue).fg(Color::White)
             } else {
-                Style::default()
+                while token < syntax.len() && syntax[token].bytes.end <= byte {
+                    token += 1;
+                }
+                syntax
+                    .get(token)
+                    .filter(|span| span.bytes.contains(&byte))
+                    .map_or(Style::default(), |span| span.style)
             };
             spans.push(Span::styled(visible, style));
         }
         column = end;
+        byte += grapheme.len();
     }
     Line::from(spans)
 }
@@ -412,8 +428,54 @@ mod tests {
     fn tabs_unicode_and_partial_wide_glyphs_use_terminal_cells() {
         assert_eq!(display_text("a\t中"), "a   中");
         assert_eq!(display_text("\u{1b}[31m"), "�[31m");
-        assert_eq!(selected_line("a中bc", 0, None, 2, 3).to_string(), " bc");
-        assert_eq!(selected_line("中", 0, None, 0, 1).to_string(), " ");
+        assert_eq!(
+            selected_line("a中bc", 0, None, 2, 3, &[]).to_string(),
+            " bc"
+        );
+        assert_eq!(selected_line("中", 0, None, 0, 1, &[]).to_string(), " ");
+    }
+
+    #[test]
+    fn syntax_colors_preserve_unicode_clipping_and_selection_cursor_overlays() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("file.py");
+        std::fs::write(&path, "def f():\n\treturn \"中e\u{301}\"\n\treturn 42").unwrap();
+        let mut app = App::new(Some(&path)).unwrap();
+        let mut terminal = Terminal::new(TestBackend::new(60, 10)).unwrap();
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let screen = terminal.backend().buffer();
+        assert!(matches!(screen[(4, 2)].fg, Color::Rgb(..)));
+        assert_ne!(screen[(4, 2)].fg, screen[(8, 2)].fg);
+        assert_eq!(screen[(16, 3)].symbol(), "中");
+        assert_eq!(screen[(18, 3)].symbol(), "e\u{301}");
+        let Screen::Editor(e) = &mut app.screen else {
+            panic!()
+        };
+        let line = &e.document.buffer.lines[1];
+        let clipped = selected_line(line, 1, None, 13, 4, e.highlighting.line(1));
+        assert_eq!(clipped.to_string(), " e\u{301}\"");
+        assert!(
+            clipped
+                .spans
+                .iter()
+                .all(|span| matches!(span.style.fg, Some(Color::Rgb(..))))
+        );
+        e.cursor = Cursor { row: 1, col: 1 };
+        e.enter_edit();
+        e.add_cursor(false);
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        assert_eq!(terminal.backend().buffer()[(8, 4)].bg, Color::Magenta);
+        let Screen::Editor(e) = &mut app.screen else {
+            panic!()
+        };
+        e.navigate();
+        e.enter_selection();
+        e.move_cursor(crate::input::Direction::Right, 6);
+        terminal.draw(|f| draw(f, &mut app)).unwrap();
+        let screen = terminal.backend().buffer();
+        assert_eq!(screen[(8, 3)].bg, Color::Blue);
+        assert_eq!(screen[(8, 3)].fg, Color::White);
+        assert!(matches!(screen[(16, 3)].fg, Color::Rgb(..)));
     }
 
     #[test]

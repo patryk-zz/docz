@@ -24,6 +24,7 @@ class Session:
         # Keep tests off the user's desktop clipboard.
         environment.pop("WAYLAND_DISPLAY", None)
         environment.pop("DISPLAY", None)
+        environment.pop("NO_COLOR", None)
         environment.update(clipboard_env or {})
 
         def controlling_terminal():
@@ -96,6 +97,22 @@ def main():
             session.send(b"\x11")
             session.finish()
             assert notes.read_bytes() == b"abcde [ok]f\r\nsecond\r\n"
+        finally:
+            session.close()
+
+        # Highlight Python multiline context while scrolling; preserve original bytes.
+        python_file = root / "highlight.py"
+        python_text = '@decorator\ndef example(name):\n    """docs\n' + '    continued\n' * 40 + '    """\n    return f"hello {name}" # comment\n'
+        python_file.write_bytes(python_text.replace('\n', '\r\n').encode())
+        session = Session(binary, root, "highlight.py")
+        try:
+            assert b"38;2;" in session.transcript, "Syntax foreground colors were not rendered"
+            session.send(b"\x1b[6~")  # PageDown into the middle of the docstring.
+            session.send(b"e#")
+            session.send(b"\x1a\x19\x1a")  # Undo/redo/undo refreshes the highlighting cache.
+            session.send(b"\x13\x11")
+            session.finish()
+            assert python_file.read_bytes() == python_text.replace('\n', '\r\n').encode()
         finally:
             session.close()
 
@@ -278,6 +295,7 @@ else:
     print("      private desktop clipboard helpers, enhanced redo, CLI, and terminal restoration.")
     print("      Q cancellation, literal keys, multicursor insertion/deletion/newlines/reset/undo.")
     print("      Automatic pairs, closer skipping, escaped quotes, empty-pair deletion, literal paste.")
+    print("      Python syntax colors, multiline viewport context, edit/undo/redo and CRLF preservation.")
 
 
 if __name__ == "__main__":

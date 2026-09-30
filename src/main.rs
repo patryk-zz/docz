@@ -5,6 +5,7 @@ mod clipboard;
 mod document;
 mod editor;
 mod input;
+mod syntax;
 mod ui;
 
 use anyhow::{Context, Result, bail};
@@ -31,6 +32,7 @@ const HELP: &str = "docz — a personal modal terminal editor\n\n\
            docz [DIRECTORY]\n\n\
     With no argument, explore the current directory.\n\
     A nonexistent file opens an empty buffer and is created when saved.\n\
+    Syntax highlighting is detected from filenames and shebangs automatically.\n\
     Use -- before a filename starting with a dash.\n\n\
     Navigate: WASD moves; Shift+A/D jumps words; Shift+W/S jumps paragraphs.\n\
     E enters Edit; F enters Selection; Esc returns to Navigate.\n\
@@ -48,6 +50,18 @@ enum Cli {
     Run(Option<PathBuf>),
     Help,
     Version,
+}
+
+fn program_name() -> &'static str {
+    if std::env::args_os().next().is_some_and(|arg| {
+        std::path::Path::new(&arg)
+            .file_name()
+            .is_some_and(|name| name == "docz-dev")
+    }) {
+        "docz-dev"
+    } else {
+        "docz"
+    }
 }
 
 fn parse_args(args: impl IntoIterator<Item = OsString>) -> Result<Cli> {
@@ -124,11 +138,11 @@ impl Drop for TerminalGuard {
 fn run() -> Result<()> {
     let path = match parse_args(std::env::args_os().skip(1))? {
         Cli::Help => {
-            println!("{HELP}");
+            println!("{}", HELP.replace("docz", program_name()));
             return Ok(());
         }
         Cli::Version => {
-            println!("docz {}", env!("CARGO_PKG_VERSION"));
+            println!("{} {}", program_name(), env!("CARGO_PKG_VERSION"));
             return Ok(());
         }
         Cli::Run(path) => path,
@@ -153,7 +167,7 @@ fn run() -> Result<()> {
 
 fn main() {
     if let Err(error) = run() {
-        eprintln!("docz: {error:#}");
+        eprintln!("{}: {error:#}", program_name());
         std::process::exit(1);
     }
 }
