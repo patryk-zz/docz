@@ -18,7 +18,7 @@ docz
 docz notes.txt
 ```
 
-The `codex/syntax-highlighting` development branch is installed separately as
+The `dev` development branch is installed separately as
 `~/.local/bin/docz-dev`:
 
 ```sh
@@ -26,9 +26,10 @@ docz-dev
 docz-dev script.py
 ```
 
-To rebuild and update the development installation from this branch:
+To rebuild and update the development installation:
 
 ```sh
+git switch dev
 cargo build --release --locked
 mkdir -p "$HOME/.local/bin"
 install -m 755 target/release/docz "$HOME/.local/bin/docz-dev"
